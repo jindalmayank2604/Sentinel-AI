@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Zap, Link2, Trash2 } from "lucide-react";
 
 export function Canvas2D({
@@ -11,6 +11,15 @@ export function Canvas2D({
   onDrop,
   onDeleteSelected
 }) {
+  const [zoom, setZoom] = useState(1);
+
+  const handleWheel = e => {
+    e.preventDefault();
+    // Keep a very small safety floor, while allowing practical zoom-in and
+    // zoom-out without an upper limit.
+    setZoom(current => Math.max(0.025, current * Math.exp(-e.deltaY * 0.0045)));
+  };
+
   return (
     <div
       className={`relative w-full h-[420px] sm:h-[480px] lg:h-[540px] bg-[#0A1017] border border-[#1D2B35] overflow-hidden select-none ${
@@ -25,7 +34,12 @@ export function Canvas2D({
       }}
       onDragOver={e => e.preventDefault()}
       onDrop={onDrop}
+      onWheel={handleWheel}
     >
+      <div
+        className="absolute inset-0 origin-center"
+        style={{ transform: `scale(${zoom})` }}
+      >
       {/* Schematic SVG Wire Paths */}
       <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
         <defs>
@@ -133,6 +147,7 @@ export function Canvas2D({
           </div>
         );
       })}
+      </div>
 
       {/* Canvas Status & Mode Overlay */}
       <div className="absolute bottom-3 left-3 bg-[#0D141C]/90 backdrop-blur-sm border border-[#1D2B35] px-3 py-1.5 text-[10px] font-mono text-[#8A98A6] flex items-center gap-3 pointer-events-none">
@@ -144,6 +159,7 @@ export function Canvas2D({
               : "WIRING MODE: CLICK 2ND COMPONENT TO COMPLETE WIRE"
             : "DRAG PALETTE TO PLACE • DRAG PART TO MOVE • CLICK TO INSPECT"}
         </span>
+        <span>• WHEEL ZOOM {zoom.toFixed(2)}×</span>
       </div>
     </div>
   );
