@@ -2,13 +2,23 @@ import React, { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 
-export function Canvas3D({ parts, wires, selected, onPick }) {
+export function Canvas3D({ parts, wires, selected, onPick, onMove }) {
   const containerRef = useRef(null);
   const sceneRef = useRef(null);
   const rendererRef = useRef(null);
   const reqIdRef = useRef(null);
   const meshesMapRef = useRef(new Map());
   const particleGroupRef = useRef(null);
+  const cameraControlRef = useRef(null);
+  const partsRef = useRef(parts);
+  const onPickRef = useRef(onPick);
+  const onMoveRef = useRef(onMove);
+
+  useEffect(() => {
+    partsRef.current = parts;
+    onPickRef.current = onPick;
+    onMoveRef.current = onMove;
+  }, [parts, onPick, onMove]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -79,6 +89,7 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
 
     // 6. Interactive Orbit & Pan state
     let isDragging = false;
+    let draggedPartIndex = null;
     let previousMousePosition = { x: 0, y: 0 };
     let cameraAngle = { theta: 0, phi: Math.PI / 3 };
     // A closer initial view keeps electronic components readable; wheel zoom
@@ -93,12 +104,54 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
     };
     updateCameraPosition();
 
+    // Raycasting is shared by selecting and drag-moving components in the
+    // rendered workspace.
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const pickPartIndex = e => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(scene.children, true);
+      for (const hit of intersects) {
+        let current = hit.object;
+        while (current && current.parent && current.parent !== scene) {
+          if (current.userData?.partIndex !== undefined) return current.userData.partIndex;
+          current = current.parent;
+        }
+        if (current?.userData?.partIndex !== undefined) return current.userData.partIndex;
+      }
+      return null;
+    };
+
     const onMouseDown = e => {
+      const partIndex = pickPartIndex(e);
+      if (partIndex !== null) {
+        draggedPartIndex = partIndex;
+        onPickRef.current?.(partIndex);
+        e.preventDefault();
+        return;
+      }
       isDragging = true;
       previousMousePosition = { x: e.clientX, y: e.clientY };
     };
 
     const onMouseMove = e => {
+      if (draggedPartIndex !== null) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const point = new THREE.Vector3();
+        if (raycaster.ray.intersectPlane(groundPlane, point)) {
+          const x = Math.max(2, Math.min(98, (point.x / 35) * 50 + 50));
+          const y = Math.max(2, Math.min(98, (point.z / 35) * 50 + 50));
+          onMoveRef.current?.(draggedPartIndex, { x, y });
+        }
+        return;
+      }
       if (!isDragging) return;
       const deltaX = e.clientX - previousMousePosition.x;
       const deltaY = e.clientY - previousMousePosition.y;
@@ -110,14 +163,26 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
       previousMousePosition = { x: e.clientX, y: e.clientY };
     };
 
-    const onMouseUp = () => { isDragging = false; };
+    const onMouseUp = () => {
+      isDragging = false;
+      draggedPartIndex = null;
+    };
+
+    const changeZoom = delta => {
+      // Exponential zoom feels responsive at every distance. There is no
+      // maximum distance, so large circuits can be viewed as far out as needed.
+      cameraDistance = Math.max(2, cameraDistance * Math.exp(delta * 0.0065));
+      updateCameraPosition();
+    };
 
     const onWheel = e => {
       e.preventDefault();
-      // Exponential zoom feels responsive at every distance. There is no
-      // maximum distance, so large circuits can be viewed as far out as needed.
-      cameraDistance = Math.max(2, cameraDistance * Math.exp(e.deltaY * 0.0065));
-      updateCameraPosition();
+      e.stopPropagation();
+      changeZoom(e.deltaY);
+    };
+    cameraControlRef.current = {
+      zoomIn: () => changeZoom(-55),
+      zoomOut: () => changeZoom(55)
     };
 
     const dom = renderer.domElement;
@@ -126,31 +191,9 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
     window.addEventListener("mouseup", onMouseUp);
     dom.addEventListener("wheel", onWheel, { passive: false });
 
-    // Click Raycaster for picking components
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-
     const onClick = e => {
-      const rect = dom.getBoundingClientRect();
-      mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-
-      raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(scene.children, true);
-      for (const hit of intersects) {
-        let current = hit.object;
-        while (current && current.parent && current.parent !== scene) {
-          if (current.userData && current.userData.partIndex !== undefined) {
-            onPick(current.userData.partIndex);
-            return;
-          }
-          current = current.parent;
-        }
-        if (current && current.userData && current.userData.partIndex !== undefined) {
-          onPick(current.userData.partIndex);
-          return;
-        }
-      }
+      const partIndex = pickPartIndex(e);
+      if (partIndex !== null) onPickRef.current?.(partIndex);
     };
     dom.addEventListener("click", onClick);
 
@@ -222,6 +265,7 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
       dom.removeEventListener("click", onClick);
       if (container.contains(dom)) container.removeChild(dom);
       particleGroupRef.current = null;
+      cameraControlRef.current = null;
       renderer.dispose();
     };
   }, []);
@@ -252,6 +296,12 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
       x: ((x - 50) / 50) * 35,
       z: ((y - 50) / 50) * 35
     });
+    const sourceProfile = part => {
+      const type = part.type.toLowerCase();
+      if (type.includes("power supply")) return { height: 7.4, terminalSpread: 1.2 };
+      if (type.includes("ac source")) return { height: 4.8, terminalSpread: 0.82 };
+      return { height: 3.35, terminalSpread: 0.58 }; // Battery: compact by design.
+    };
 
     // Build 3D models for each part
     parts.forEach((part, index) => {
@@ -315,7 +365,7 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
             const bounds = new THREE.Box3().setFromObject(model);
             const size = bounds.getSize(new THREE.Vector3());
             const longestSide = Math.max(size.x, size.y, size.z, 0.001);
-            const normalizedScale = 7 / longestSide;
+            const normalizedScale = 4.2 / longestSide;
             model.scale.setScalar(normalizedScale);
 
             const normalizedBounds = new THREE.Box3().setFromObject(model);
@@ -366,18 +416,20 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
         coil.rotation.x = Math.PI / 2;
         coil.position.y = 1.4;
         group.add(coil);
-      } else if (type.includes("battery") || type.includes("source")) {
+      } else if (type.includes("battery") || type.includes("source") || type.includes("power supply")) {
         // The supplied battery asset represents both the Battery library item
         // and existing AC Source / voltage-source parts in saved presets.
         // Both have two visible top terminals for physical wire anchors.
-        const fallbackGeo = new THREE.BoxGeometry(3.7, 5.4, 2.4);
+        const profile = sourceProfile(part);
+        const footprint = profile.height * 0.58;
+        const fallbackGeo = new THREE.BoxGeometry(footprint, profile.height, footprint * 0.62);
         const fallbackMat = new THREE.MeshStandardMaterial({
           color: isSelected ? 0x48e6d2 : 0x28475a,
           roughness: 0.38,
           metalness: 0.5
         });
         const fallback = new THREE.Mesh(fallbackGeo, fallbackMat);
-        fallback.position.y = 2.7;
+        fallback.position.y = profile.height / 2;
         group.add(fallback);
 
         const positiveTerminalMat = new THREE.MeshStandardMaterial({
@@ -396,22 +448,22 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
         });
         // Terminal zero is the positive (+) terminal: DC particles leave here
         // and return through terminal one (−), using conventional-current direction.
-        [-0.9, 0.9].forEach((x, terminalIndex) => {
+        [-profile.terminalSpread, profile.terminalSpread].forEach((x, terminalIndex) => {
           const terminal = new THREE.Mesh(
             new THREE.CylinderGeometry(0.32, 0.32, 0.42, 16),
             terminalIndex === 0 ? positiveTerminalMat : negativeTerminalMat
           );
-          terminal.position.set(x, 5.62, 0);
+          terminal.position.set(x, profile.height + 0.12, 0);
           terminal.userData = { batteryTerminal: terminalIndex, polarity: terminalIndex === 0 ? "+" : "−" };
           group.add(terminal);
 
           const markerMat = terminalIndex === 0 ? positiveTerminalMat : negativeTerminalMat;
           const horizontal = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.07, 0.09), markerMat);
-          horizontal.position.set(x, 5.88, 0);
+          horizontal.position.set(x, profile.height + 0.38, 0);
           group.add(horizontal);
           if (terminalIndex === 0) {
             const vertical = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.07, 0.52), markerMat);
-            vertical.position.set(x, 5.88, 0);
+            vertical.position.set(x, profile.height + 0.38, 0);
             group.add(vertical);
           }
         });
@@ -425,7 +477,7 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
             const bounds = new THREE.Box3().setFromObject(model);
             const size = bounds.getSize(new THREE.Vector3());
             const height = Math.max(size.y, 0.001);
-            model.scale.setScalar(5.5 / height);
+            model.scale.setScalar(profile.height / height);
             const normalizedBounds = new THREE.Box3().setFromObject(model);
             const center = normalizedBounds.getCenter(new THREE.Vector3());
             model.position.set(-center.x, 0.08 - normalizedBounds.min.y, -center.z);
@@ -447,14 +499,14 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
         const isStepperMotor = type.includes("stepper");
         // Steppers have a squat, high-torque body; other motors retain the
         // longer industrial chassis.
-        const motorGeo = new THREE.CylinderGeometry(isStepperMotor ? 2.35 : 2, isStepperMotor ? 2.35 : 2, isStepperMotor ? 3.6 : 5, 24);
+        const motorGeo = new THREE.CylinderGeometry(isStepperMotor ? 2.65 : 2.35, isStepperMotor ? 2.65 : 2.35, isStepperMotor ? 4.1 : 5.8, 24);
         const motorMat = new THREE.MeshStandardMaterial({
           color: isSelected ? 0x48e6d2 : 0x334155,
           metalness: 0.6,
           roughness: 0.4
         });
         const motor = new THREE.Mesh(motorGeo, motorMat);
-        motor.position.y = isStepperMotor ? 1.8 : 2.5;
+        motor.position.y = isStepperMotor ? 2.05 : 2.9;
         group.add(motor);
 
         // Rotating shaft / rotor. Steppers additionally expose a toothed rotor
@@ -486,7 +538,7 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
               const bounds = new THREE.Box3().setFromObject(model);
               const size = bounds.getSize(new THREE.Vector3());
               const longestSide = Math.max(size.x, size.y, size.z, 0.001);
-              model.scale.setScalar(5.4 / longestSide);
+              model.scale.setScalar(6.6 / longestSide);
               const normalizedBounds = new THREE.Box3().setFromObject(model);
               const center = normalizedBounds.getCenter(new THREE.Vector3());
               model.position.set(-center.x, 0.08 - normalizedBounds.min.y, -center.z);
@@ -544,8 +596,7 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
       meshesMapRef.current.set(index, group);
     });
 
-    // Work out the electrically outward direction from the battery. A second
-    // particle travels in reverse, visually completing the return path.
+    // Work out source types and the connected circuit topology.
     const isBatteryLike = part => {
       const type = part.type.toLowerCase();
       return type.includes("battery") || type.includes("source") || type.includes("power supply");
@@ -584,9 +635,18 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
       const links = wires.filter(link => link.from === partIndex || link.to === partIndex);
       const terminal = Math.max(0, links.indexOf(wire)) % 2;
       const batteryMesh = meshesMapRef.current.get(partIndex);
-      const terminalPoint = new THREE.Vector3(terminal === 0 ? -0.9 : 0.9, 5.84, 0);
+      const profile = sourceProfile(part);
+      const terminalPoint = new THREE.Vector3(
+        terminal === 0 ? -profile.terminalSpread : profile.terminalSpread,
+        profile.height + 0.34,
+        0
+      );
       if (batteryMesh) return batteryMesh.localToWorld(terminalPoint);
-      return new THREE.Vector3(mapped.x + (terminal === 0 ? -0.9 : 0.9), 5.84, mapped.z);
+      return new THREE.Vector3(
+        mapped.x + (terminal === 0 ? -profile.terminalSpread : profile.terminalSpread),
+        profile.height + 0.34,
+        mapped.z
+      );
     };
 
     const terminalForWire = (sourceIndex, wire) => {
@@ -594,8 +654,66 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
       return Math.max(0, links.indexOf(wire)) % 2;
     };
 
+    // For DC, derive a single directed circuit loop: source + terminal →
+    // components → source − terminal. This avoids the misleading "away from
+    // source" distance heuristic that can reverse a component's wire in a loop.
+    const dcFlowDirections = new Map();
+    if (dcSourceIndex !== -1) {
+      const sourceWireIndexes = wires
+        .map((wire, index) => ({ wire, index }))
+        .filter(({ wire }) => wire.from === dcSourceIndex || wire.to === dcSourceIndex)
+        .map(({ index }) => index);
+      const positiveWireIndex = sourceWireIndexes[0];
+      const negativeWireIndex = sourceWireIndexes[1];
+
+      if (positiveWireIndex !== undefined) {
+        const positiveWire = wires[positiveWireIndex];
+        const firstNode = positiveWire.from === dcSourceIndex ? positiveWire.to : positiveWire.from;
+        dcFlowDirections.set(positiveWireIndex, positiveWire.from === dcSourceIndex ? 1 : -1);
+
+        if (negativeWireIndex !== undefined) {
+          const negativeWire = wires[negativeWireIndex];
+          const lastNode = negativeWire.from === dcSourceIndex ? negativeWire.to : negativeWire.from;
+          const adjacency = new Map();
+          wires.forEach((wire, index) => {
+            if (index === positiveWireIndex || index === negativeWireIndex) return;
+            if (wire.from === dcSourceIndex || wire.to === dcSourceIndex) return;
+            if (!adjacency.has(wire.from)) adjacency.set(wire.from, []);
+            if (!adjacency.has(wire.to)) adjacency.set(wire.to, []);
+            adjacency.get(wire.from).push({ node: wire.to, index });
+            adjacency.get(wire.to).push({ node: wire.from, index });
+          });
+
+          const previous = new Map();
+          const pending = [firstNode];
+          previous.set(firstNode, null);
+          while (pending.length && !previous.has(lastNode)) {
+            const node = pending.shift();
+            (adjacency.get(node) || []).forEach(next => {
+              if (!previous.has(next.node)) {
+                previous.set(next.node, { from: node, wireIndex: next.index });
+                pending.push(next.node);
+              }
+            });
+          }
+
+          if (previous.has(lastNode)) {
+            let cursor = lastNode;
+            while (cursor !== firstNode) {
+              const step = previous.get(cursor);
+              const wire = wires[step.wireIndex];
+              dcFlowDirections.set(step.wireIndex, wire.from === step.from ? 1 : -1);
+              cursor = step.from;
+            }
+            // The final edge must enter the negative terminal.
+            dcFlowDirections.set(negativeWireIndex, negativeWire.to === dcSourceIndex ? 1 : -1);
+          }
+        }
+      }
+    }
+
     // Build 3D Wires and battery-powered current-flow paths.
-    wires.forEach(w => {
+    wires.forEach((w, wireIndex) => {
       const a = parts[w.from];
       const b = parts[w.to];
       if (!a || !b) return;
@@ -623,21 +741,14 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
 
       const fromDistance = electricalDistance.get(w.from) ?? 0;
       const toDistance = electricalDistance.get(w.to) ?? 0;
-      let outwardDirection = fromDistance <= toDistance ? 1 : -1;
-      if (dcSourceIndex !== -1 && (w.from === dcSourceIndex || w.to === dcSourceIndex)) {
-        const terminal = terminalForWire(dcSourceIndex, w);
-        // Conventional DC current: + terminal → circuit → − terminal.
-        outwardDirection = terminal === 0
-          ? (w.from === batteryIndex ? 1 : -1)
-          : (w.from === batteryIndex ? -1 : 1);
-      }
+      const outwardDirection = dcFlowDirections.get(wireIndex) ?? (fromDistance <= toDistance ? 1 : -1);
       const hasAcSource = acSourceIndex !== -1
         && electricalDistance.has(w.from)
         && electricalDistance.has(w.to);
 
       // DC charge moves one way with conventional polarity. AC charge
       // oscillates back and forth rather than pretending to be DC flow.
-      const particleCount = hasAcSource ? 3 : 2;
+      const particleCount = hasAcSource ? 3 : 1;
       for (let i = 0; i < particleCount; i++) {
         const pGeo = new THREE.SphereGeometry(0.34, 12, 12);
         const pMat = new THREE.MeshStandardMaterial({
@@ -663,6 +774,25 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
     <div className="relative w-full h-[420px] sm:h-[480px] lg:h-[540px] bg-[#070B11] border border-[#1D2B35] overflow-hidden select-none">
       <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
+      <div className="absolute top-3 left-3 flex border border-[#1D2B35] bg-[#0D141C]/90 backdrop-blur-md">
+        <button
+          type="button"
+          onClick={() => cameraControlRef.current?.zoomIn()}
+          className="px-3 py-1.5 text-sm font-mono text-[#E6EDF3] hover:bg-[#16313a] hover:text-[#48E6D2] border-r border-[#1D2B35]"
+          title="Zoom in"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={() => cameraControlRef.current?.zoomOut()}
+          className="px-3 py-1.5 text-sm font-mono text-[#E6EDF3] hover:bg-[#16313a] hover:text-[#48E6D2]"
+          title="Zoom out"
+        >
+          −
+        </button>
+      </div>
+
       {/* 3D Viewport Controls & Instructions */}
       <div className="absolute top-3 right-3 bg-[#0D141C]/80 backdrop-blur-md border border-[#1D2B35] px-3 py-1.5 text-[10px] font-mono text-[#8A98A6] flex items-center gap-2">
         <span className="w-2 h-2 rounded-full bg-[#48E6D2] animate-pulse"></span>
@@ -670,7 +800,7 @@ export function Canvas3D({ parts, wires, selected, onPick }) {
       </div>
 
       <div className="absolute bottom-3 left-3 bg-[#0D141C]/80 backdrop-blur-md border border-[#1D2B35] px-3 py-1.5 text-[10px] font-mono text-[#8A98A6] flex items-center gap-2 pointer-events-none">
-        <span>LEFT-DRAG TO ORBIT • WHEEL TO ZOOM • CLICK COMPONENT TO SELECT</span>
+        <span>DRAG COMPONENT TO MOVE • DRAG EMPTY SPACE TO ORBIT • WHEEL TO ZOOM</span>
       </div>
     </div>
   );

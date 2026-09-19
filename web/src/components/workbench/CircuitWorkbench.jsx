@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ComponentPalette } from "./ComponentPalette";
 import { Canvas2D } from "./Canvas2D";
 import { Canvas3D } from "./Canvas3D";
@@ -13,7 +13,8 @@ import {
   RotateCcw, 
   Maximize2,
   Cpu,
-  Info
+  Info,
+  MousePointer2
 } from "lucide-react";
 
 export function CircuitWorkbench({
@@ -87,6 +88,38 @@ export function CircuitWorkbench({
     setWireStart(null);
   };
 
+  const handleMove3DComponent = (index, position) => {
+    setParts(previous => previous.map((part, i) => (i === index ? { ...part, ...position } : part)));
+  };
+
+  useEffect(() => {
+    const onKeyDown = event => {
+      const element = event.target;
+      if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element?.isContentEditable) return;
+
+      const key = event.key.toLowerCase();
+      if (key === "v") {
+        setWireMode(false);
+        setWireStart(null);
+      } else if (key === "w") {
+        setWireMode(value => !value);
+        setWireStart(null);
+      } else if (event.key === "1") {
+        setView3D(false);
+      } else if (event.key === "2") {
+        setView3D(true);
+      } else if (event.key === "escape") {
+        setWireMode(false);
+        setWireStart(null);
+      } else if ((event.key === "Delete" || event.key === "Backspace") && selected !== null) {
+        event.preventDefault();
+        handleDeleteSelected();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selected]);
+
   return (
     <div className="space-y-4 sm:space-y-6 animate-fade-in">
       {/* Workbench Header */}
@@ -96,6 +129,21 @@ export function CircuitWorkbench({
         description="Design RLC topologies, wire active and passive components, and calculate resonant frequencies and damping ratios in real time."
         actions={
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setWireMode(false);
+                setWireStart(null);
+              }}
+              className={`px-3 py-1.5 border text-xs font-mono flex items-center gap-1.5 transition-all ${
+                !wireMode
+                  ? "bg-[#16313a] border-[#48E6D2] text-[#48E6D2]"
+                  : "bg-[#111A23] border-[#1D2B35] text-[#E6EDF3] hover:border-[#48E6D2]/50"
+              }`}
+              title="Select and move components (V)"
+            >
+              <MousePointer2 className="w-3.5 h-3.5" />
+              <span>SELECT</span>
+            </button>
             {/* 2D / 3D Mode Toggle */}
             <button
               onClick={() => setView3D(!view3D)}
@@ -209,6 +257,7 @@ export function CircuitWorkbench({
               wires={wires}
               selected={selected}
               onPick={handlePickComponent}
+              onMove={handleMove3DComponent}
             />
           ) : (
             <Canvas2D

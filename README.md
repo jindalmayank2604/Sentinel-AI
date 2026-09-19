@@ -37,6 +37,36 @@ The application works without scikit-learn; when installed, Isolation Forest can
 - RLC analytical digital-twin simulator and measurement comparison
 - JSON project persistence and CSV feature export
 
+## Circuit workbench controls
+
+The Circuit Workbench has both a 2D schematic view and an interactive Three.js 3D view.
+
+### 3D workspace
+
+- Drag a component to move it across the workbench plane.
+- Drag empty space to orbit the camera.
+- Use the mouse wheel or the `+` / `−` controls to zoom. Wheel input is captured by the canvas and does not scroll the page.
+- Select a component with the **SELECT** tool or by clicking it.
+- The 3D scene uses the supplied resistor, battery, and stepper-motor GLB assets when those component types are used.
+- Component proportions are intentional: resistor and battery are compact; AC source is medium; power supply and motors are larger.
+- DC circuits animate conventional current along one calculated loop: `+ terminal → circuit → − terminal`. AC source circuits instead use a gentle source vibration and oscillating charge markers.
+
+### Keyboard shortcuts
+
+| Key | Action |
+| --- | --- |
+| `V` | Select / move mode |
+| `W` | Toggle wire mode |
+| `1` | Switch to the 2D schematic |
+| `2` | Switch to the 3D workspace |
+| `Delete` or `Backspace` | Delete the selected component |
+| `Esc` | Exit wire mode |
+
+### 2D workspace
+
+- Use the mouse wheel or the `+` / `−` controls to zoom the schematic.
+- Drag a component-library item onto the canvas to place it, drag an existing component to reposition it, and use **CONNECT WIRE** to create links.
+
 ## NASA C-MAPSS workflow
 
 Download `CMAPSSData.zip` from the official NASA C-MAPSS page, extract it, and choose **Signal Lab → Import NASA C-MAPSS**. Select a `train_FD*.txt` or `test_FD*.txt` file, an engine unit, and a sensor channel (1–21). Training trajectories end at failure and can provide remaining-useful-life labels; test trajectories stop before failure and must not be treated as labelled failures.

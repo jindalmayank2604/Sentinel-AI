@@ -15,6 +15,7 @@ export function Canvas2D({
 
   const handleWheel = e => {
     e.preventDefault();
+    e.stopPropagation();
     // Keep a very small safety floor, while allowing practical zoom-in and
     // zoom-out without an upper limit.
     setZoom(current => Math.max(0.025, current * Math.exp(-e.deltaY * 0.0045)));
@@ -36,6 +37,24 @@ export function Canvas2D({
       onDrop={onDrop}
       onWheel={handleWheel}
     >
+      <div className="absolute top-3 left-3 z-30 flex border border-[#1D2B35] bg-[#0D141C]/90 backdrop-blur-sm">
+        <button
+          type="button"
+          onClick={() => setZoom(current => current * 1.25)}
+          className="px-3 py-1.5 text-sm font-mono text-[#E6EDF3] hover:bg-[#16313a] hover:text-[#48E6D2] border-r border-[#1D2B35]"
+          title="Zoom in"
+        >
+          +
+        </button>
+        <button
+          type="button"
+          onClick={() => setZoom(current => Math.max(0.025, current * 0.8))}
+          className="px-3 py-1.5 text-sm font-mono text-[#E6EDF3] hover:bg-[#16313a] hover:text-[#48E6D2]"
+          title="Zoom out"
+        >
+          −
+        </button>
+      </div>
       <div
         className="absolute inset-0 origin-center"
         style={{ transform: `scale(${zoom})` }}
